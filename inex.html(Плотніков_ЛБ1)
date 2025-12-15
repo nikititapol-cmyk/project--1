@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+password_audit.py
+Програма для аналізу безпеки паролів з використанням персональних даних.
+Запуск: python3 password_audit.py
+"""
+
+import re
+import json
+import math
+from collections import Counter
+
+# ----------------------
+# Налаштування / дані
+# ----------------------
+
+# Якщо хочете, підмінить цей блок своїми персональними даними.
+PERSONAL_DATA = {
+    "first_names": ["nikita", "nik", "никита"],
+    "last_names": ["plotnikov", "плотников"],
+    "nicknames": ["nikita"],
+    "emails": ["nikitita.pol@gmail.com"],
+    "dates": ["2004-08-24", "24.08.2004", "20040824"],  # приклади
+    "phone": ["380991234567"]
+}
+
+# Невеликий локальний список поширених паролів (можна розширити файлом common_passwords.txt)
+COMMON_PASSWORDS = {
+    "123456", "password", "qwerty", "111111", "123456789", "12345678",
+    "abc123", "iloveyou", "admin", "letmein", "welcome", "monkey"
+}
+
+# Параметри оцінки
+WEIGHTS = {
+    "length": 0.25,
+    "charset": 0.2,
+    "entropy": 0.2,
+    "personal_data": 0.25,
+    "common": 0.1  # зменшує рахунок, якщо в common
+}
+
+
+# ----------------------
+# Утиліти
+# ----------------------
+
+def generate_personal_variants(personal_data):
+    """Генеруємо набір варіантів рядків для перевірки (нижній регістр)."""
+    variants = set()
+    for k, vals in personal_data.items():
+        for v in vals:
+            s = str(v).strip().lower()
+            if not s:
+                continue
+            variants.add(s)
+            # прості трансформації: без символів, тільки цифри з дати, реверс
+            variants.add(re.sub(r'\W+', '', s))  # видалити небуквені
+            variants.add(s[::-1])  # реверс
+            # з дат: окремі частини
+            if re.match(r'\d{4}-\d{2}-\d{2}', s):
+                y, m, d = s.split('-')
+                variants.add(y)
+                variants.add(y + m)
+                variants.add(d + m + y)
+            # крапки у даті
+            if re.match(r'\d{2}\.\d{2}\.\d{4}', s):
+                d, m, y = s.split('.')
+                variants.add(y)
+                variants.add(d + m + y)
+    # прибрати порожні
+    variants = {v for v in variants if v}
+    return variants
+
+
+def shannon_entropy(password):
+    """Оцінка ентропії за формулою Шеннона (біт/символ)."""
+    if not password:
+        return 0.0
+    counts = Counter(password)
+    length = len(password)
+    ent = 0.0
+    for c in counts.values():
+        p = c / length
+        ent -= p * math.log2(p)
+    # повертаємо біт/символ і загальну ентропію
+    return ent, ent * length
+
+
+def charset_score(password):
+    """Оцінюємо наскільки багатий набір символів"""
+    sets = 0
+    if re.search(r'[a-z]', password): sets += 1
+    if re.search(r'[A-Z]', password): sets += 1
+    if re.search(r'\d', password): sets += 1
+    if re.search(r'[^A-Za-z0-9]', password): sets += 1
+    # повертаємо від 0 до 1
+    return sets / 4.0
+
+
+def length_score(password):
+    """Проста оцінка по довжині (0..1)"""
+    L = len(password)
+    if L == 0: return 0.0
+    if L >= 16: return 1.0
+    if L >= 12: return 0.9
+    if L >= 10: return 0.7
+    if L >= 8: return 0.4
+    return max(0.05, L / 12.0)
+
+
+def contains_personal(password, personal_variants):
+    """Шукаємо підрядки персональних даних у паролі. Повертаємо знайдені варіанти."""
+    found = set()
+    p_low = password.lower()
+    for v in personal_variants:
+        if not v: continue
+        if v in p_low:
+            found.add(v)
+    # також перевіримо рік, місяць, день як числа
+    digits = re.findall(r'\d{2,4}', password)
+    for d in digits:
+        if d in personal_variants:
+            found.add(d)
+    return found
+
+
+def has_sequence(password):
+    """Шукаємо прості послідовності типу 'abcd', '1234' або повтори 'aaaa'."""
+    pw = password.lower()
+    # послідовності латиниці
+    for i in range(len(pw) - 3):
+        chunk = pw[i:i+4]
+        # перевірка алфавітної або цифрової послідовності
+        if re.match(r'^[a-z]{4}$', chunk):
+            # перевіримо чи монотонно зростає в ASCII
+            if all(ord(chunk[j+1]) - ord(chunk[j]) == 1 for j in range(3)):
+                return True, f"sequence:{chunk}"
+        if re.match(r'^\d{4}$', chunk):
+            if all(int(chunk[j+1]) - int(chunk[j]) == 1 for j in range(3)):
+                return True, f"sequence:{chunk}"
+    # повтори
+    for i in range(len(pw) - 3):
+        chunk = pw[i:i+4]
+        if len(set(chunk)) == 1:
+            return True, f"repeat:{chunk}"
+    return False, None
+
+
+# ----------------------
+# Основна логіка аналізу
+# ----------------------
+
+def analyze_password(password, personal_variants, common_passwords=None):
+    if common_passwords is None:
+        common_passwords = set()
+    result = {
+        "password": password,
+        "length": len(password),
+        "charset_score": None,
+        "length_score": None,
+        "entropy_per_char": None,
+        "entropy_total": None,
+        "contains_personal": [],
+        "sequence_or_repeats": None,
+        "is_common_password": False,
+        "score": 0.0,
+        "rating": None,
+        "recommendations": []
+    }
+
+    # базові метрики
+    ent_per_char, ent_total = shannon_entropy(password)
+    result["entropy_per_char"] = round(ent_per_char, 3)
+    result["entropy_total"] = round(ent_total, 3)
+    result["charset_score"] = round(charset_score(password), 3)
+    result["length_score"] = round(length_score(password), 3)
+
+    # особисті дані
+    found_personal = contains_personal(password, personal_variants)
+    if found_personal:
+        result["contains_personal"] = sorted(found_personal)
+
+    # послідовності / повтори
+    seq_flag, seq_desc = has_sequence(password)
+    if seq_flag:
+        result["sequence_or_repeats"] = seq_desc
+
+    # common
+    if password.lower() in common_passwords:
+        result["is_common_password"] = True
+
+    # підсумковий скор — комбінуємо (де вищий: краще)
+    # початковий базовий бал (0..1)
+    score = 0.0
+    score += WEIGHTS["length"] * result["length_score"]
+    score += WEIGHTS["charset"] * result["charset_score"]
+    # нормалізуємо ентропію: вважаємо що >=80 бит загальної ентропії — відмінно
+    ent_norm = min(result["entropy_total"] / 80.0, 1.0)
+    score += WEIGHTS["entropy"] * ent_norm
+
+    # персональні дані сильно знижують бал
+    if result["contains_personal"]:
+        # чим більше уразливостей — тим сильніше штраф
+        penalty = 0.0 + 0.2 * len(result["contains_personal"])
+        score -= WEIGHTS["personal_data"] * min(penalty, 1.0)
+    else:
+        score += WEIGHTS["personal_data"] * 1.0
+
+    # common password penalize
+    if result["is_common_password"]:
+        score -= WEIGHTS["common"]
+    else:
+        score += WEIGHTS["common"]
+
+    # sequence penalty
+    if seq_flag:
+        score -= 0.05
+
+    # clamp 0..1
+    score = max(0.0, min(1.0, score))
+    result["score"] = round(score, 3)
+
+    # rating
+    if score >= 0.85:
+        rating = "Very strong"
+    elif score >= 0.7:
+        rating = "Strong"
+    elif score >= 0.5:
+        rating = "Moderate"
+    elif score >= 0.3:
+        rating = "Weak"
+    else:
+        rating = "Very weak"
+    result["rating"] = rating
+
+    # рекомендації
+    recs = []
+    if result["length"] < 12:
+        recs.append("Збільшити довжину пароля до >=12 символів (краще 16+).")
+    if result["charset_score"] < 1.0:
+        recs.append("Додати великі літери, цифри та спеціальні символи.")
+    if result["contains_personal"]:
+        recs.append("Не використовувати імена, прізвища, дати народження або їх частини в паролях.")
+    if result["is_common_password"]:
+        recs.append("Не використовувати загальновідомі паролі (common passwords).")
+    if result["sequence_or_repeats"]:
+        recs.append("Уникати простих послідовностей або повторів символів.")
+    if ent_total < 60:
+        recs.append("Підвищити унікальність і випадковість пароля (росклад: комбінація випадкових слів або менеджер паролів).")
+    if not recs:
+        recs.append("Пароль виглядає надійним, але розгляньте використання менеджера паролів і двофакторної автентифікації.")
+    result["recommendations"] = recs
+
+    return result
+
+
+# ----------------------
+# CLI / Приклад
+# ----------------------
+
+def run_interactive_example():
+    print("=== Password Audit (demo) ===")
+    # згенеруємо персональні варіанти
+    personal_variants = generate_personal_variants(PERSONAL_DATA)
+
+    print("Персональні варіанти для перевірки:", sorted(list(personal_variants))[:10], " ...")
+    print()
+
+    # 5 тестових паролів (завдання лабораторії — приклад з ім'ям і датою)
+    test_passwords = [
+        "Nikita2004",       # містить ім'я і рік
+        "Plotnikov!24.08",  # містить прізвище та дату
+        "August2004!",      # рік 2004
+        "qwerty1234",       # послідовність / common
+        "X7%t9#Lp2qB!k"     # випадковий сильний пароль
+    ]
+
+    results = []
+    for pw in test_passwords:
+        res = analyze_password(pw, personal_variants, COMMON_PASSWORDS)
+        results.append(res)
+
+    # друкуємо звіт
+    print(json.dumps(results, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    run_interactive_example()
