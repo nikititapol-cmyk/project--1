@@ -1,0 +1,164 @@
+from PIL import Image, ImageDraw, ImageFont
+import numpy as np
+import os
+
+# =============================
+#     Створення тестового фото
+# =============================
+def generate_demo_image(path="original_image.png"):
+    W, H = 800, 600
+    img = Image.new("RGB", (W, H))
+    pixels = img.load()
+
+    # Генеруємо градієнтне зображення
+    for y in range(H):
+        for x in range(W):
+            r = int(255 * (x / W))
+            g = int(255 * (y / H))
+            b = int(128 + 127 * ((x+y)/(W+H)))
+            pixels[x, y] = (r, g, b)
+
+    # Текстові дані
+    text_demo = "Плотніков Микита Сергійович\n01.01.2000"
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 28)
+    except:
+        font = ImageFont.load_default()
+    draw.text((20, 20), text_demo, font=font, fill=(255, 255, 255))
+
+    img.save(path)
+    print(f"[OK] Створено тестове зображення: {path}")
+    return path
+
+
+# =============================
+#     Допоміжні LSB функції
+# =============================
+def _to_bits(data: bytes):
+    for byte in data:
+        for i in range(8)[::-1]:  # від старшого до молодшого
+            yield (byte >> i) & 1
+
+
+def _bits_to_bytes(bits):
+    b = 0
+    out = bytearray()
+    for i, bit in enumerate(bits):
+        b = (b << 1) | bit
+        if (i % 8) == 7:
+            out.append(b)
+            b = 0
+    return bytes(out)
+
+
+# =============================
+#     Приховування повідомлення
+# =============================
+def hide_message(image_path, out_path, message: str):
+    img = Image.open(image_path)
+    arr = np.array(img)
+    h, w, c = arr.shape
+    capacity = h * w * c  # Кількість доступних біт
+
+    msg_bytes = message.encode()
+    msg_len = len(msg_bytes)
+    total_bits = 32 + msg_len * 8
+
+    if total_bits > capacity:
+        raise ValueError("Повідомлення занадто велике для цього зображення")
+
+    len_bytes = msg_len.to_bytes(4, "big")
+    bits = list(_to_bits(len_bytes)) + list(_to_bits(msg_bytes))
+
+    flat = arr.flatten()
+
+    for i, bit in enumerate(bits):
+        flat[i] = (flat[i] & ~1) | bit
+
+    new_arr = flat.reshape(arr.shape)
+    Image.fromarray(new_arr).save(out_path)
+
+    print(f"[OK] Повідомлення приховано у файлі: {out_path}")
+
+
+# =============================
+#     Витягування повідомлення
+# =============================
+def extract_message(image_path):
+    img = Image.open(image_path)
+    arr = np.array(img)
+    flat = arr.flatten()
+
+    # 32 біти — довжина
+    len_bits = [flat[i] & 1 for i in range(32)]
+    msg_len = int.from_bytes(_bits_to_bytes(len_bits), "big")
+
+    msg_bits = [flat[32 + i] & 1 for i in range(msg_len * 8)]
+    message = _bits_to_bytes(msg_bits).decode("utf-8")
+
+    print(f"[OK] Витягнуте повідомлення: {message}")
+    return message
+
+
+# =============================
+#     Створення карти відмінностей
+# =============================
+def create_diff_map(orig_path, stego_path, out_path="diff_map.png"):
+    orig = np.array(Image.open(orig_path))
+    stego = np.array(Image.open(stego_path))
+
+    h, w, _ = orig.shape
+    diff = orig != stego
+    changed = np.any(diff, axis=2)
+
+    diff_img = Image.new("RGB", (w, h))
+    px = diff_img.load()
+    orig_px = Image.open(orig_path).load()
+
+    for y in range(h):
+        for x in range(w):
+            if changed[y, x]:
+                px[x, y] = (255, 0, 0)  # червоне підсвічування
+            else:
+                px[x, y] = orig_px[x, y]
+
+    diff_img.save(out_path)
+    print(f"[OK] Карта відмінностей створена: {out_path}")
+
+
+# =============================
+#     Головна демонстрація
+# =============================
+def main():
+    original = generate_demo_image()
+
+    message = "Плотніков Микита Сергійович; 01.01.2000"
+    stego = "stego_image.png"
+
+    hide_message(original, stego, message)
+    extracted = extract_message(stego)
+
+    create_diff_map(original, stego)
+
+    # Аналіз змін
+    orig = np.array(Image.open(original))
+    st = np.array(Image.open(stego))
+
+    diff = orig != st
+    changed = np.any(diff, axis=2)
+
+    total = orig.shape[0] * orig.shape[1]
+    changed_pixels = changed.sum()
+    percent = changed_pixels / total * 100
+
+    with open("analysis_results.txt", "w", encoding="utf-8") as f:
+        f.write(f"Змінено пікселів: {changed_pixels}\n")
+        f.write(f"Відсоток змінених: {percent:.6f}%\n")
+        f.write(f"Відновлене повідомлення: {extracted}\n")
+
+    print("[OK] Результати збережено у analysis_results.txt")
+
+
+if __name__ == "__main__":
+    main()
