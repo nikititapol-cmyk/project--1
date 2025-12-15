@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+"""
+Проста система цифрового підпису (навчальна реалізація).
+Збережіть як simple_ds.py та запустіть: python simple_ds.py
+"""
+
+import hashlib
+import os
+import sys
+
+# ---------- Налаштування / допоміжні функції ----------
+MOD = 1000007  # модуль для спрощеної математики публічного ключа
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.digest()  # повертає байти
+
+def bytes_to_int(b: bytes) -> int:
+    return int.from_bytes(b, byteorder="big")
+
+def int_to_bytes(i: int, length: int = None) -> bytes:
+    if length is None:
+        length = (i.bit_length() + 7) // 8 or 1
+    return i.to_bytes(length, byteorder="big")
+
+# ---------- Генерація ключів (на основі персональних даних) ----------
+def generate_keys(name: str, birthdate: str, secret_word: str):
+    """
+    name, birthdate (наприклад '24002004'), secret_word
+    Приватний ключ: hash(name + birthdate + secret_word) -> int
+    Публічний ключ: (priv * 7) mod MOD
+    """
+    concat = (name + birthdate + secret_word).encode('utf-8')
+    h = hashlib.sha256(concat).digest()
+    priv = bytes_to_int(h)  # приватний ключ як велике число
+    pub = (priv * 7) % MOD
+    return priv, pub
+
+def save_key(filename: str, data):
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(str(data))
+
+def load_key_int(filename: str) -> int:
+    with open(filename, "r", encoding="utf-8") as f:
+        return int(f.read().strip())
+
+# ---------- Підпис (спрощено) ----------
+def sign_file(file_path: str, priv_key: int, signature_path: str):
+    """
+    Підпис (навчальний): signature = bytes_of_hash XOR priv_key_bytes (вирівняні по довжині)
+    Зберігаємо підпис у hex-форматі (для зручності).
+    """
+    h_bytes = sha256_file(file_path)  # 32 байти
+    h_int = bytes_to_int(h_bytes)
+
+    # Представимо priv_key в байтах тієї ж довжини:
+    priv_bytes = int_to_bytes(priv_key, length=len(h_bytes))
+    priv_int_truncated = bytes_to_int(priv_bytes)
+
+    sig_int = h_int ^ priv_int_truncated
+    sig_hex = format(sig_int, 'x')
+    with open(signature_path, "w", encoding="utf-8") as f:
+        f.write(sig_hex)
+    return sig_hex
+
+# ---------- Перевірка підпису ----------
+def verify_signature(file_path: str, signature_path: str, pub_key: int):
+    """
+    Для демонстрації в прикладі ми маємо спрощену відповідність:
+    pub_key = (priv_key * 7) mod MOD.
+    При перевірці спробуємо «відновити» приватний ключ за публічним ключем
+    простим евристичним способом — оскільки тут схема спрощена, ми переберемо
+    кілька кандидатів приватних ключів, які задовольняють (priv*7) mod MOD == pub.
+    Потім використаємо їх для розшифрування підпису та порівняння хешу.
+    """
+    # читаємо підпис
+    with open(signature_path, "r", encoding="utf-8") as f:
+        sig_hex = f.read().strip()
+    sig_int = int(sig_hex, 16)
+    h_bytes = sha256_file(file_path)
+    h_int_current = bytes_to_int(h_bytes)
+    # підготувати довжину
+    length = len(h_bytes)
+
+    # Оскільки модуль невеликий (1000007), можемо перебрати можливі priv % MOD
+    # і перевірити, чи дає один з них коректний хеш після "розшифровки"
+    found = False
+    # переберемо всі можливі r в [0, MOD-1] таких що (r*7)%MOD == pub_key
+    candidates = []
+    for r in range(MOD):
+        if (r * 7) % MOD == pub_key:
+            candidates.append(r)
+    # candidates — значення priv mod MOD. Але реальний priv може бути великим.
+    # Ми не знаємо точного priv, але для демонстрації спробуємо побудувати bytes з r
+    # і побачити, чи розшифроване значення збігається з поточним хешом.
+    for r in candidates:
+        # створимо байтовий представник r довжиною length
+        r_bytes = int_to_bytes(r, length=length)
+        r_int = bytes_to_int(r_bytes)
+        # відновлений хеш
+        recovered_h_int = sig_int ^ r_int
+        if recovered_h_int == h_int_current:
+            found = True
+            break
+
+    return found
+
+# ---------- Демонстрація: створення файлу, підпис, перевірка, підробка ----------
+def demo():
+    # приклад персональних даних
+    name = "Плотніков"
+    birth = "24082004"
+    secret = "secret_word"
+
+    # файли
+    doc = "resume_petrenko.pdf"  # для демонстрації може бути будь-який файл
+    signature_file = "resume_petrenko.sig"
+    priv_file = "private.key"
+    pub_file = "public.key"
+
+    # Якщо файл документа відсутній — створимо демонстраційний
+    if not os.path.exists(doc):
+        with open(doc, "wb") as f:
+            f.write
+        print(f"Створено демонстраційний файл '{doc}'.")
+
+    # 1) Генерація ключів
+    priv, pub = generate_keys(name, birth, secret)
+    save_key(priv_file, priv)
+    save_key(pub_file, pub)
+    print(f"Згенеровано ключі. Приватний збережено в '{priv_file}', публічний в '{pub_file}'.")
+
+    # 2) Підпис документа
+    sig_hex = sign_file(doc, priv, signature_file)
+    print(f"Документ підписано. Підпис збережено в '{signature_file}'. (hex, коротко)")
+
+    # 3) Перевірка підпису (оригінальний файл)
+    ok = verify_signature(doc, signature_file, pub)
+    print("Перевірка підпису на оригінальному файлі:", "ПІДПИС ДІЙСНИЙ" if ok else "ПІДРОБКА/НЕДІЙСНИЙ")
+
+    # 4) Демонстрація підробки: змінюємо документ
+    with open(doc, "ab") as f:
+        f.write
+    print("Файл змінено (демонстрація підробки).")
+
+    ok2 = verify_signature(doc, signature_file, pub)
+    print("Перевірка підпису після зміни файлу:", "ПІДПИС ДІЙСНИЙ" if ok2 else "ПІДРОБКА/НЕДІЙСНИЙ")
+
+    # 5) Спроба підробити підпис (імітація): спробуємо створити новий підпис, використавши тільки публічний ключ
+    # Оскільки приватний ключ невідомий — в реальній ситуації підробити не вийде.
+    # Тут ми спробуємо створити "фіктивний" підпис на основі pub (має не пройти перевірку).
+    fake_signature_path = "resume_petrenko_fake.sig"
+    # створимо фальшивий підпис як рандомне число (або просто як h XOR pub_bytes)
+    fake_sig_int = bytes_to_int(sha256_file(doc)) ^ pub  # абсолютно не коректний метод
+    with open(fake_signature_path, "w", encoding="utf-8") as f:
+        f.write(format(fake_sig_int, 'x'))
+    ok3 = verify_signature(doc, fake_signature_path, pub)
+    print("Спроба підробити підпис (створено 'fake' підпис):", "ПІДПИС ДІЙСНИЙ" if ok3 else "ПІДРОБКА/НЕДІЙСНИЙ")
+
+if __name__ == "__main__":
+    demo()
