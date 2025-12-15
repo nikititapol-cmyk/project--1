@@ -1,0 +1,151 @@
+# ---------------------------------------------
+#  CLASSIC CIPHERS FOR UKRAINIAN ALPHABET
+#  Caesar, Vigenere, Atbash
+#  FULL WORKING IMPLEMENTATION
+# ---------------------------------------------
+
+# Український алфавіт
+alpha_lower = list("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
+alpha_upper = [c.upper() for c in alpha_lower]
+ALPHABET_LEN = len(alpha_lower)
+
+# Індекси символів
+index_lower = {c: i for i, c in enumerate(alpha_lower)}
+index_upper = {c: i for i, c in enumerate(alpha_upper)}
+
+
+# ------------------------------------------------------
+# 1) CAESAR CIPHER
+# ------------------------------------------------------
+def caesar_encrypt(text, shift):
+    result = []
+    for ch in text:
+        if ch in index_lower:
+            i = (index_lower[ch] + shift) % ALPHABET_LEN
+            result.append(alpha_lower[i])
+        elif ch in index_upper:
+            i = (index_upper[ch] + shift) % ALPHABET_LEN
+            result.append(alpha_upper[i])
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+def caesar_decrypt(text, shift):
+    return caesar_encrypt(text, -shift)
+
+
+# ------------------------------------------------------
+# 2) VIGENERE CIPHER
+# ------------------------------------------------------
+def vigenere_encrypt(text, key):
+    key_indices = [
+        index_lower[k.lower()] for k in key if k.lower() in index_lower
+    ]
+    if not key_indices:
+        raise ValueError("Ключ Віженера не містить українських букв!")
+
+    result = []
+    ki = 0
+
+    for ch in text:
+        if ch in index_lower:
+            shift = key_indices[ki % len(key_indices)]
+            i = (index_lower[ch] + shift) % ALPHABET_LEN
+            result.append(alpha_lower[i])
+            ki += 1
+        elif ch in index_upper:
+            shift = key_indices[ki % len(key_indices)]
+            i = (index_upper[ch] + shift) % ALPHABET_LEN
+            result.append(alpha_upper[i])
+            ki += 1
+        else:
+            result.append(ch)
+
+    return "".join(result)
+
+
+def vigenere_decrypt(text, key):
+    key_indices = [
+        index_lower[k.lower()] for k in key if k.lower() in index_lower
+    ]
+    result = []
+    ki = 0
+
+    for ch in text:
+        if ch in index_lower:
+            shift = key_indices[ki % len(key_indices)]
+            i = (index_lower[ch] - shift) % ALPHABET_LEN
+            result.append(alpha_lower[i])
+            ki += 1
+        elif ch in index_upper:
+            shift = key_indices[ki % len(key_indices)]
+            i = (index_upper[ch] - shift) % ALPHABET_LEN
+            result.append(alpha_upper[i])
+            ki += 1
+        else:
+            result.append(ch)
+
+    return "".join(result)
+
+
+# ------------------------------------------------------
+# 3) ATBASH (реверсний алфавіт)
+# ------------------------------------------------------
+def atbash_encrypt(text):
+    mapping_lower = {alpha_lower[i]: alpha_lower[-1 - i] for i in range(ALPHABET_LEN)}
+    mapping_upper = {alpha_upper[i]: alpha_upper[-1 - i] for i in range(ALPHABET_LEN)}
+
+    result = []
+    for ch in text:
+        if ch in mapping_lower:
+            result.append(mapping_lower[ch])
+        elif ch in mapping_upper:
+            result.append(mapping_upper[ch])
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
+def atbash_decrypt(text):
+    return atbash_encrypt(text)   # симетричний
+
+
+# ------------------------------------------------------
+# 4) BRUTE FORCE CAESAR
+# ------------------------------------------------------
+def caesar_bruteforce(ciphertext):
+    results = []
+    for shift in range(1, ALPHABET_LEN):
+        decrypted = caesar_decrypt(ciphertext, shift)
+        results.append((shift, decrypted))
+    return results
+
+
+# ------------------------------------------------------
+# 5) DEMO — запуск прикладу
+# ------------------------------------------------------
+if __name__ == "__main__":
+    name = "Никита"
+    surname = "Плотников"
+    shift = 7
+    text = "Захист інформації – важлива дисципліна"
+
+    print("=== CAESAR ===")
+    c = caesar_encrypt(text, shift)
+    print("Encrypted:", c)
+    print("Decrypted:", caesar_decrypt(c, shift))
+
+    print("\n=== VIGENERE ===")
+    v = vigenere_encrypt(text, surname)
+    print("Encrypted:", v)
+    print("Decrypted:", vigenere_decrypt(v, surname))
+
+    print("\n=== ATBASH ===")
+    a = atbash_encrypt(text)
+    print("Encrypted:", a)
+    print("Decrypted:", atbash_decrypt(a))
+
+    print("\n=== BRUTE FORCE CAESAR ===")
+    for s, cand in caesar_bruteforce(c)[:10]:
+        print(f"shift={s}: {cand}")
