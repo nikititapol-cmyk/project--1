@@ -1,0 +1,32 @@
+import hashlib
+import base64
+
+def generate_key(personal_data: str) -> bytes:
+    """Генерація ключа як SHA-256 хешу"""
+    return hashlib.sha256(personal_data.encode()).digest()
+
+def encrypt(message: str, key: bytes) -> str:
+    data = message.encode()
+    encrypted = bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
+    return base64.b64encode(encrypted).decode()
+
+def decrypt(ciphertext: str, key: bytes) -> str:
+    encrypted = base64.b64decode(ciphertext)
+    decrypted = bytes([encrypted[i] ^ key[i % len(key)] for i in range(len(encrypted))])
+    return decrypted.decode()
+
+# === Демонстрація ===
+email = "nikitita.pol@gmail.com"
+personal_data = "NikitaPlotnikov2004"
+message = "Зустрічаємося завтра о 15:00"
+
+key = generate_key(personal_data)
+
+encrypted_message = encrypt(message, key)
+decrypted_message = decrypt(encrypted_message, key)
+
+print("Електронна адреса:", email)
+print("Ключ (SHA-256):", key.hex())
+print("Оригінальне повідомлення:", message)
+print("Зашифроване повідомлення:", encrypted_message)
+print("Розшифроване повідомлення:", decrypted_message)
