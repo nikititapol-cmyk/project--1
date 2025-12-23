@@ -1,0 +1,28 @@
+import sqlite3
+
+def secure_login(username, password):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    query = """
+    SELECT * FROM users
+    WHERE username = ? AND password = ?
+    """
+
+    cursor.execute(query, (username, password))
+    result = cursor.fetchone()
+    conn.close()
+
+    return result
+
+# ===== Демонстрація =====
+print("=== ЗАХИЩЕНА ВЕРСІЯ ===")
+user = input("Username: ")
+pwd = input("Password: ")
+
+result = secure_login(user, pwd)
+
+if result:
+    print("✔ УСПІШНИЙ ВХІД")
+else:
+    print("✖ ВХІД НЕ ВДАЛОСЯ (інʼєкція заблокована)")
