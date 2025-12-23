@@ -1,0 +1,73 @@
+import time
+import os
+from Crypto.Cipher import AES
+from PIL import Image
+import numpy as np
+
+class AESProtection:
+    def __init__(self, key):
+        self.key = key
+    
+    def encrypt(self, input_path, output_path):
+        start = time.time()
+  
+        with open(input_path, 'rb') as f:
+            data = f.read()
+        cipher = AES.new(self.key, AES.MODE_EAX)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
+        with open(output_path, 'wb') as f:
+            f.write(cipher.nonce + tag + ciphertext)
+        end = time.time()
+        return end - start, os.path.getsize(output_path)
+    
+    def decrypt(self, input_path, output_path):
+        start = time.time()
+        with open(input_path, 'rb') as f:
+            nonce, tag, ciphertext = [f.read(x) for x in (16,16,-1)]
+        cipher = AES.new(self.key, AES.MODE_EAX, nonce)
+        data = cipher.decrypt_and_verify(ciphertext, tag)
+        with open(output_path, 'wb') as f:
+            f.write(data)
+        end = time.time()
+        return end - start, os.path.getsize(output_path)
+
+class LSBSteganography:
+    def hide(self, cover_image_path, secret_file_path, output_image_path):
+        start = time.time()
+        img = Image.open(cover_image_path)
+        img_data = np.array(img)
+        with open(secret_file_path, 'rb') as f:
+            secret_data = f.read()
+    
+        Image.fromarray(img_data).save(output_image_path)
+        end = time.time()
+        return end - start, os.path.getsize(output_image_path)
+    
+    def reveal(self, stego_image_path, output_file_path):
+        start = time.time()
+        end = time.time()
+        return end - start, os.path.getsize(output_file_path)
+
+class ProtectionSystem:
+    def __init__(self, aes_key, cover_image_path):
+        self.aes = AESProtection(aes_key)
+        self.stego = LSBSteganography()
+        self.cover_image_path = cover_image_path
+    
+    def protect(self, input_file_path):
+        encrypted_file = "encrypted.bin"
+        t1, size1 = self.aes.encrypt(input_file_path, encrypted_file)
+        
+        protected_image = "protected.png"
+        t2, size2 = self.stego.hide(self.cover_image_path, encrypted_file, protected_image)
+        
+        return protected_image, {"AES_time": t1, "AES_size": size1, "LSB_time": t2, "LSB_size": size2}
+    
+    def restore(self, protected_image_path):
+        extracted_file = "extracted_encrypted.bin"
+        t1, size1 = self.stego.reveal(protected_image_path, extracted_file)
+        
+        restored_file = "restored_output"
+        t2, size2 = self.aes.decrypt(extracted_file, restored_file)
+        
+        return restored_file, {"LSB_time": t1, "LSB_size": size1, "AES_time": t2, "AES_size": size2}
