@@ -1,0 +1,29 @@
+import sqlite3
+
+def vulnerable_login(username, password):
+    conn = sqlite3.connect("users.db")
+    cursor = conn.cursor()
+
+    query = f"""
+    SELECT * FROM users
+    WHERE username = '{username}' AND password = '{password}'
+    """
+    print("SQL-запит:", query)
+
+    cursor.execute(query)
+    result = cursor.fetchone()
+    conn.close()
+
+    return result
+
+# ===== Демонстрація =====
+print("=== ВРАЗЛИВА ВЕРСІЯ ===")
+user = input("Username: ")
+pwd = input("Password: ")
+
+result = vulnerable_login(user, pwd)
+
+if result:
+    print("✔ УСПІШНИЙ ВХІД (інʼєкція можлива)")
+else:
+    print("✖ ВХІД НЕ ВДАЛОСЯ")
